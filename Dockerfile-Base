@@ -1,0 +1,22 @@
+FROM node:18-buster-slim
+
+COPY ./wkhtmltox_0.12.6-1.buster_amd64.deb .
+
+RUN \
+    sed -i 's/deb.debian.org/mirrors.cloud.tencent.com/g;s/security.debian.org/mirrors.cloud.tencent.com/g;s/security.debian.org/mirrors.cloud.tencent.com/g' /etc/apt/sources.list \
+    && apt-get clean all && apt-get update && mkdir -p /usr/share/man/man1 \
+    && apt-get install --no-install-recommends -y \
+      wget xfonts-intl-chinese ttf-wqy-microhei  xfonts-wqy fonts-arphic-ukai fonts-cwtex-fs fonts-symbola xfonts-intl-european xfonts-intl-japanese \
+      fontconfig libfreetype6 libjpeg62-turbo libpng16-16 libx11-6 libxcb1 libxext6 libxrender1 xfonts-75dpi \
+      xfonts-base libfontconfig1 fontconfig-config libx11-data libxau6 libxdmcp6 ucf fonts-dejavu-core libexpat1 libbsd0 xfonts-utils libfontenc1 x11-common \
+      xfonts-encodings sensible-utils \
+      libatk1.0-dev libatk-bridge2.0-dev  libxcomposite-dev libxrandr2 libgbm1 libxkbcommon-dev libpango1.0-dev \
+      default-jdk 
+RUN  (dpkg -i wkhtmltox_0.12.6-1.buster_amd64.deb; echo ignore wkhtmlx error) && apt --fix-broken -y install && rm -rf wkhtmltox_0.12.6-1.buster_amd64.deb
+RUN npm config set registry https://registry.npmmirror.com -g \
+    # && npm config set sass_binary_site https://cdn.npmmirror.com/dist/node-sass -g \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /etc/rc.*/*dbus \
+    && apt-get clean all
+
+ENV PATH /usr/local/bin:$PATH
+ENV NODE_ENV production

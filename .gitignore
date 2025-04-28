@@ -1,0 +1,8 @@
+/yarn.lock
+/package-lock.json
+/node_modules
+/.idea
+/dist
+/public/*
+/latest.tar
+wkhtmltox_0.12.6-1.buster_amd64.deb
