@@ -305,3 +305,10 @@ static/js
 </style>
 ```
 
+
+
+## 拉取容器
+docker pull registry.cn-hangzhou.aliyuncs.com/ym-public/book-js:2503
+
+## 启动容器 
+docker-compose up -d

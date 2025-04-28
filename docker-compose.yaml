@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+   book-js:
+      restart: always
+      container_name: docker_bookjs_1
+      image: registry.cn-hangzhou.aliyuncs.com/ym-public/book-js:2503
+      volumes:
+         - $PWD/data/bookjs/public:/book_js/public
+      environment:
+         - TZ=Asia/Shanghai
+         - RUN_ENV=dev
+         - MAX_BROWSER=3
+         - PORT=80
+      ports:
+         - "770:80"
+      command: ["tail", "-f", "/dev/null"]
