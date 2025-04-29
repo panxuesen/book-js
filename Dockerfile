@@ -1,10 +1,11 @@
-FROM registry.cn-hangzhou.aliyuncs.com/consume/book-js:base 
+FROM registry.cn-hangzhou.aliyuncs.com/ym-public/book-js:base
 
 WORKDIR /book_js
 
 COPY ./package.json /book_js
 
 RUN pwd && ls /book_js
+
 
 RUN npm cache clean --force \
     && npm config set registry https://registry.npmjs.org -g\
@@ -19,9 +20,8 @@ RUN npm cache clean --force \
 COPY . /book_js
 RUN chmod 777 *.sh
 
-
-EXPOSE 3000
+EXPOSE 80
 
 VOLUME /book_js/public
 
-ENTRYPOINT /book_js/run.sh
+CMD ["/book_js/run.sh"]

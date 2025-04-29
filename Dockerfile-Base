@@ -18,5 +18,10 @@ RUN npm config set registry https://registry.npmmirror.com -g \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /etc/rc.*/*dbus \
     && apt-get clean all
 
+RUN apt-get update \
+    && apt-get install -y dbus \
+    && mkdir -p /var/run/dbus \
+    && apt-get clean all
+
 ENV PATH /usr/local/bin:$PATH
 ENV NODE_ENV production
