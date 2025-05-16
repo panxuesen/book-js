@@ -59,4 +59,4 @@ jobs:
           password: ${{ secrets.HOST_PASSWORD }} # 服务器登录密码
           port: ${{ secrets.HOST_PORT }} # 服务器ssh端口
           script: |
-            docker service update --image ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }} --with-registry-auth cv_bookjs
+            docker service update --image ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }} --with-registry-auth bookjs
