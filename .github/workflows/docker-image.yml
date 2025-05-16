@@ -5,7 +5,7 @@ on:
     branches: [ "master" ]
 
 env:
-  IMAGE_NAME: registry.cn-hangzhou.aliyuncs.com/consume/book-js
+  IMAGE_NAME: ${{secrets.DOCKER_SERVICE}}/xpan/book-js
   IMAGE_TAG: latest
 
 
@@ -33,7 +33,7 @@ jobs:
           echo "outputs tag: ${{ steps.set_tag.outputs.current_tag }}"
 
       - name: Login docker hub
-        run: docker login --username=${{ secrets.ALI_DOCKER_USERNAME }} --password ${{ secrets.ALI_DOCKER_PASSWORD }} registry.cn-hangzhou.aliyuncs.com
+        run: docker login --username=${{ secrets.DOCKER_USERNAME }} --password ${{ secrets.DOCKER_PASSWORD }} ${{secrets.DOCKER_SERVICE}}
 
       - name: Build image
         run: docker build . --file Dockerfile --tag ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}
