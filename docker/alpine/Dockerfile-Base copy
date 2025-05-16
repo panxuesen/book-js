@@ -1,0 +1,92 @@
+# 使用多阶段构建
+FROM surnet/alpine-wkhtmltopdf:3.21.3-024b2b2-full AS wkhtmltox
+FROM node:18-alpine
+
+# 设置镜像源加速
+RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main" > /etc/apk/repositories && \
+echo "https://mirrors.aliyun.com/alpine/v3.18/community" >> /etc/apk/repositories
+
+# 复制wkhtmltox文件
+COPY --from=wkhtmltox /bin/wkhtmltopdf /usr/local/bin/
+COPY --from=wkhtmltox /bin/wkhtmltoimage /usr/local/bin/
+COPY --from=wkhtmltox /lib/* /usr/lib/
+# nss, harfbuzz, ttf-liberation, dbus, ca-certificates, libjpeg-turbo, libpng, freetype
+# 安装其他依赖
+RUN apk update && apk add --no-cache \
+    libstdc++ \
+    libx11 \
+    libxrender \
+    libxext \
+    # libjpeg-turbo \
+    # libpng \
+    # libxcb \
+    # freetype \
+    fontconfig \
+    ttf-dejavu \
+    ttf-droid \
+    ttf-freefont \
+    # ttf-liberation \
+    # 支持中日韩文字
+    font-noto-cjk \
+    # 微软雅黑
+    font-wqy-zenhei \
+    # 其他您需要的依赖
+    xvfb \
+    # 浏览器相关依赖
+    libxcomposite \
+    libxrandr \
+    mesa-gbm \
+    libxkbcommon \
+    pango \
+    # Java : jre只包含运行Java程序所需的组件提及较小 jdk包含编译、构建、运行Java程序所需的组件体积较大
+    # openjdk11-jre \
+    openjdk17-jdk \ 
+    # 添加dbus用于run.sh脚本
+    # dbus \
+    bash \
+    # 补充包
+    # chromium \
+    # nss \
+    # harfbuzz \
+    # ca-certificates \
+    libc6-compat
+    # 找不到以下包
+    # atk-dev
+    # at-spi2-atk-dev
+    # 文泉驿微米黑
+    # font-wqy-microhei
+
+# 创建dbus系统目录
+RUN mkdir -p /var/run/dbus
+
+# 配置npm
+RUN npm config set registry https://registry.npmmirror.com -g
+
+# 创建字体目录
+RUN mkdir -p /usr/share/fonts
+
+# 清理缓存
+RUN rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+# 设置环境变量
+ENV PATH=/usr/local/bin:$PATH \
+    NODE_ENV=production \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# 创建wkhtmltopdf的xvfb包装脚本
+RUN echo '#!/bin/sh\nxvfb-run -a --server-args="-screen 0, 1024x768x24" /usr/local/bin/wkhtmltopdf "$@"' > /usr/local/bin/wkhtmltopdf-xvfb \
+    && chmod +x /usr/local/bin/wkhtmltopdf-xvfb
+
+FROM alpine:edge
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories \
+    && apk update && apk add --no-cache \
+    chromium \
+    chromium-swiftshader \
+    mesa-vulkan-radeon \
+    libxcb \
+    libxcb-xfixes0 \
+    libxcb-randr0
+
+ENV ANGLE_DEFAULT_PLATFORM=swiftshader \
+    EGL_PLATFORM=angle

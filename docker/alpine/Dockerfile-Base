@@ -1,0 +1,66 @@
+# --------------------------------
+# 阶段1: 构建专用工具链 (WKHTMLTOPDF)
+# --------------------------------
+FROM surnet/alpine-wkhtmltopdf:3.21.3-024b2b2-full AS wkhtmltox
+
+# --------------------------------
+# 阶段2: Node.js 应用构建环境
+# --------------------------------
+FROM node:18-alpine AS node-builder
+# 设置镜像源加速
+# RUN echo "https://mirrors.aliyun.com/alpine/v3.18/main" > /etc/apk/repositories && \
+#     echo "https://mirrors.aliyun.com/alpine/v3.18/community" >> /etc/apk/repositories
+
+# 复制 WKHTMLTOPDF 工具链
+COPY --from=wkhtmltox /bin/wkhtmltopdf /usr/local/bin/
+COPY --from=wkhtmltox /bin/wkhtmltoimage /usr/local/bin/
+COPY --from=wkhtmltox /lib/* /usr/lib/
+
+# 集中安装系统级依赖（合并RUN指令减少层数）
+RUN apk update && apk add --no-cache \
+    # 核心图形库
+    libstdc++ libx11 libxrender libxext libxcb \
+    # 字体和排版
+    fontconfig ttf-dejavu ttf-freefont font-noto-cjk font-wqy-zenhei \
+    # X11和渲染支持
+    xvfb libxcomposite libxrandr mesa-gbm libxkbcommon pango \
+    # Java环境
+    openjdk17-jdk \
+    # 系统工具
+    bash libc6-compat \
+    # Vulkan兼容层（解决 ANGLE 错误）
+    mesa-vulkan-intel \
+    && rm -rf /var/cache/apk/*
+
+# 配置 npm 镜像源
+RUN npm config set registry https://registry.npmmirror.com -g
+
+# --------------------------------
+# 阶段3: 最终生产镜像（最小化）
+# --------------------------------
+FROM alpine:edge
+# 启用 Edge 仓库获取最新 Chromium
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    apk update && apk add --no-cache \
+    mesa-dri-gallium \
+    mesa-vulkan-radeon-edge \
+    vulkan-tools \
+    # 浏览器核心依赖
+    chromium chromium-swiftshader nss harfbuzz \
+    # 兼容性库
+    libc6-compat
+
+# 从构建阶段复制必要文件
+COPY --from=node-builder /usr/local/bin/ /usr/local/bin/
+COPY --from=node-builder /usr/lib/ /usr/lib/
+COPY --from=node-builder /usr/share/fonts/ /usr/share/fonts/
+
+# 环境变量配置（解决 Chromium 渲染问题）
+ENV ANGLE_DEFAULT_PLATFORM=swiftshader \
+    EGL_PLATFORM=angle \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# 初始化系统目录
+RUN mkdir -p /var/run/dbus /tmp/.X11-unix && \
+    chmod 1777 /tmp/.X11-unix

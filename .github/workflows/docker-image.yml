@@ -1,0 +1,62 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [ "master" ]
+
+env:
+  IMAGE_NAME: registry.cn-hangzhou.aliyuncs.com/consume/book-js
+  IMAGE_TAG: latest
+
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+    outputs:
+      current_tag: ${{ steps.set_tag.outputs.current_tag }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: set Image tag
+        id: set_tag
+        run: |
+          TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')
+          echo "CURRENT_TAG=$TAG" >> $GITHUB_ENV
+          echo "current_tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Print Image name
+        run: |
+          echo "CURRENT_IMAGE_NAME=${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}"
+          echo "outputs tag: ${{ steps.set_tag.outputs.current_tag }}"
+
+      - name: Login docker hub
+        run: docker login --username=${{ secrets.ALI_DOCKER_USERNAME }} --password ${{ secrets.ALI_DOCKER_PASSWORD }} registry.cn-hangzhou.aliyuncs.com
+
+      - name: Build image
+        run: docker build . --file Dockerfile --tag ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}
+
+      - name: Push docker image
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }} ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+  deploy-docker:
+
+    needs: [ build ]
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }} # 服务器ip
+          username: ${{ secrets.HOST_USERNAME }} # 服务器登录用户名
+          password: ${{ secrets.HOST_PASSWORD }} # 服务器登录密码
+          port: ${{ secrets.HOST_PORT }} # 服务器ssh端口
+          script: |
+            docker service update --image ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }} --with-registry-auth cv_bookjs

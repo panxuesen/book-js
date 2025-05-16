@@ -1,0 +1,34 @@
+version: '3'
+
+services:
+   book-js:
+      restart: always
+      container_name: bookjs_1
+      # 使用我们构建的Alpine版本镜像
+      image: uhub.service.ucloud.cn/tojoy/book-js:latest-alpine
+      # 明确指定平台，确保在M1 Mac上也能正常运行
+      platform: linux/arm64
+      volumes:
+         - $PWD/data/bookjs/public:/book_js/public
+         # 添加字体持久化存储，避免每次重启都需要重新安装字体
+         - $PWD/data/bookjs/fonts:/usr/share/fonts/custom
+      environment:
+         - TZ=Asia/Shanghai
+         - RUN_ENV=dev
+         - MAX_BROWSER=3
+         - PORT=80
+      ports:
+         - "3001:80"
+      # 由于我们已经设置了CMD，这里可以删除command部分
+      # 增加内存限制，避免潜在的OOM问题
+      deploy:
+         resources:
+            limits:
+               memory: 2G
+      # 健康检查
+      healthcheck:
+         test: ["CMD", "wget", "-q", "--spider", "http://localhost:80"]
+         interval: 30s
+         timeout: 10s
+         retries: 3
+         start_period: 40s

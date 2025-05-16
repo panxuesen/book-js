@@ -6,7 +6,7 @@ const path = require('path');
 const moment = require('moment');
 
 // PDF保存1天 , 0: 不清理PDF文件
-let keepDay = ~~(process.env.PDF_KEEP_DAY || 0);
+let keepDay = ~~(process.env.PDF_KEEP_DAY || 2);
 if(keepDay < 0){
     keepDay = 0;
 }
