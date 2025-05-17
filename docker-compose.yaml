@@ -2,9 +2,17 @@ version: '3'
 
 services:
    book-js:
-      restart: always
-      container_name: docker_bookjs_1
-      image: uhub.service.ucloud.cn/xpan/book-js:latest
+      deploy:
+        replicas: 1
+        restart_policy:  # Swarm 模式专用重启策略
+          condition: on-failure
+          delay: 5s
+          max_attempts: 3
+        resources:
+          limits:
+            cpus: '0.5'
+            memory: 512M
+      image: ${IMAGE_NAME}:${IMAGE_TAG}
       volumes:
          - $PWD/data/bookjs/public:/book_js/public
       environment:
