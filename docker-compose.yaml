@@ -15,8 +15,6 @@ services:
       image: ${IMAGE_NAME}:${IMAGE_TAG}
       volumes:
         - bookjs_public_data:/app/public  # 使用命名卷
-      volumes:
-        bookjs_public_data:  # 声明卷
       environment:
          - TZ=Asia/Shanghai
          - RUN_ENV=dev
@@ -25,3 +23,5 @@ services:
       ports:
          - "770:80"
       command: ["tail", "-f", "/dev/null"]
+volumes:
+  bookjs_public_data:  # 声明卷
