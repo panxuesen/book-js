@@ -59,4 +59,19 @@ jobs:
           password: ${{ secrets.HOST_PASSWORD }} # 服务器登录密码
           port: ${{ secrets.HOST_PORT }} # 服务器ssh端口
           script: |
-            docker service update --image ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }} --with-registry-auth bookjs
+            # 拉取代码（含 docker-compose.yaml）
+            git clone https://${{ secrets.GIT_TOKEN }}@github.com/your-repo.git /tmp/deploy
+            cd /tmp/deploy
+  
+            # 动态替换镜像标签
+            sed -i "s|image: .*|image: ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }}|" docker-compose.yaml
+  
+            # 启用 Swarm（若未初始化）
+            docker swarm init 2> /dev/null || true
+  
+            # 部署 Stack
+            docker stack deploy \
+              --compose-file docker-compose.yaml \
+              --with-registry-auth \
+              bookjs_stack
+
