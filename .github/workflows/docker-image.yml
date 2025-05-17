@@ -64,7 +64,7 @@ jobs:
             mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
             
             # 克隆仓库（带错误处理）
-            git clone --depth 1 https://github.com/panxuesen/book-js . || { echo "❌ Git clone failed"; exit 1; }
+            git clone --depth 1 https://github.com/panxuesen/book-js.git . || { echo "❌ Git clone failed"; exit 1; }
             
             # 动态替换镜像标签
             sed -i "s|image: .*|image: ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }}|" docker-compose.yaml
