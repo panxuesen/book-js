@@ -79,5 +79,5 @@ jobs:
               bookjs_stack || { echo "❌ Deploy failed"; exit 1; }
             
             # 清理临时目录（可选）
-            cd .. && rm -rf $DEPLOY_DIR
+            # cd .. && rm -rf $DEPLOY_DIR
 
