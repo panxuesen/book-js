@@ -14,8 +14,7 @@ services:
             memory: 512M
       image: ${IMAGE_NAME}:${IMAGE_TAG}
       volumes:
-         # - $PWD/data/bookjs/public:/book_js/public
-         - bookjs_public_data:/app/public  # 使用命名卷
+        - bookjs_public_data:/app/public  # 使用命名卷
       volumes:
         bookjs_public_data:  # 声明卷
       environment:
