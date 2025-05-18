@@ -1,27 +1,43 @@
-version: '3'
+version: '3.8'
 
 services:
-   book-js:
-      deploy:
-        replicas: 1
-        restart_policy:  # Swarm 模式专用重启策略
-          condition: on-failure
-          delay: 5s
-          max_attempts: 3
-        resources:
-          limits:
-            cpus: '0.5'
-            memory: 512M
-      image: ${IMAGE_NAME}:${IMAGE_TAG}
-      volumes:
-        - bookjs_public_data:/app/public  # 使用命名卷
-      environment:
-         - TZ=Asia/Shanghai
-         - RUN_ENV=dev
-         - MAX_BROWSER=3
-         - PORT=80
-      ports:
-         - "770:80"
-      command: ["tail", "-f", "/dev/null"]
+  app:
+    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 768M
+    volumes:
+      - bookjs_data:/app/data
+    environment:
+      TZ: Asia/Shanghai
+      NODE_ENV: production
+    ports:
+      - "770:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
-  bookjs_public_data:  # 声明卷
+  bookjs_data:
+    driver_opts:
+      type: nfs
+      o: addr=nfs.example.com,rw
+      device: ":/path/to/data"
+
+networks:
+  default:
+    driver: overlay
+    attachable: true
