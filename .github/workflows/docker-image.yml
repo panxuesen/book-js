@@ -1,83 +1,87 @@
-name: Backend CI
+name: BookJS CI/CD Pipeline
 
 on:
   push:
     branches: [ "master" ]
 
 env:
-  IMAGE_NAME: ${{secrets.DOCKER_SERVICE}}/xpan/book-js
-  IMAGE_TAG: latest
-
+  REGISTRY: ${{ secrets.DOCKER_SERVICE }}
+  IMAGE_NAME: ${{ env.REGISTRY }}/xpan/book-js
 
 jobs:
-
-  build:
-
+  build-push:
     runs-on: ubuntu-latest
     outputs:
-      current_tag: ${{ steps.set_tag.outputs.current_tag }}
+      image_tag: ${{ steps.meta.outputs.tags }}
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: set Image tag
-        id: set_tag
-        run: |
-          TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')
-          echo "CURRENT_TAG=$TAG" >> $GITHUB_ENV
-          echo "current_tag=$TAG" >> $GITHUB_OUTPUT
-
-      - name: Print Image name
-        run: |
-          echo "CURRENT_IMAGE_NAME=${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}"
-          echo "outputs tag: ${{ steps.set_tag.outputs.current_tag }}"
-
-      - name: Login docker hub
-        run: docker login --username=${{ secrets.DOCKER_USERNAME }} --password ${{ secrets.DOCKER_PASSWORD }} ${{secrets.DOCKER_SERVICE}}
-
-      - name: Build image
-        run: docker build . --file Dockerfile --tag ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}
-
-      - name: Push docker image
-        run: |
-          docker push ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }}
-          docker tag ${{ env.IMAGE_NAME }}:${{ env.CURRENT_TAG }} ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-          docker push ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-  deploy-docker:
-
-    needs: [ build ]
-    runs-on: ubuntu-latest
-
-    steps:
-
-      - name: Deploy
-        uses: appleboy/ssh-action@master
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          host: ${{ secrets.HOST }} # 服务器ip
-          username: ${{ secrets.HOST_USERNAME }} # 服务器登录用户名
-          password: ${{ secrets.HOST_PASSWORD }} # 服务器登录密码
-          port: ${{ secrets.HOST_PORT }} # 服务器ssh端口
-          script: |
-            # 确保目录存在且清空旧内容
-            DEPLOY_DIR="/tmp/deploy-bookjs-$(date +%s)"
-            mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
-            
-            # 克隆仓库（带错误处理）
-            git clone --depth 1 https://github.com/panxuesen/book-js.git . || { echo "❌ Git clone failed"; exit 1; }
-            
-            # 动态替换镜像标签
-            sed -i "s|image: .*|image: ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.current_tag }}|" docker-compose.yaml
-            
-            # 初始化Swarm（忽略已存在的错误）
-            docker swarm init --advertise-addr 127.0.0.1 2>/dev/null || true
-            
-            # 部署服务
-            docker stack deploy \
-              --compose-file docker-compose.yaml \
-              --with-registry-auth \
-              bookjs_stack || { echo "❌ Deploy failed"; exit 1; }
-            
-            # 清理临时目录（可选）
-            # cd .. && rm -rf $DEPLOY_DIR
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=date,pattern=yyMMdd-HHmmss
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: SSH Deployment
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.HOST_USERNAME }}
+          password: ${{ secrets.HOST_PASSWORD }}
+          port: ${{ secrets.HOST_PORT }}
+          script: |
+            DEPLOY_DIR="/srv/bookjs"
+            
+            # 创建持久化目录结构
+            sudo mkdir -p $DEPLOY_DIR/{config,data}
+            sudo chown -R $USER:$USER $DEPLOY_DIR
+            
+            # 创建环境文件
+            echo "IMAGE_TAG=${TAG}" | tee $DEPLOY_DIR/config/.env
+            
+            # 使用正式目录而非临时目录
+            cd $DEPLOY_DIR
+            
+            # 安全克隆（使用SSH密钥更佳）
+            git clone --depth 1 https://github.com/panxuesen/book-js.git . || {
+              git fetch origin && git reset --hard origin/master
+            }
+            
+            # Swarm模式初始化
+            docker swarm init --advertise-addr eth0 2>/dev/null || true
+            
+            # 带健康检查的部署
+            docker stack deploy \
+              --compose-file docker-compose.prod.yaml \
+              --with-registry-auth \
+              bookjs_stack || exit 1
+            
+            # 清理旧镜像
+            docker image prune -af --filter "until=24h"
