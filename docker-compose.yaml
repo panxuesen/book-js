@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   app:
-    image: ${IMAGE_NAME}:${IMAGE_TAG}
+    image: uhub.service.ucloud.cn/xpan/book-js:latest
     deploy:
       replicas: 2
       update_config:
