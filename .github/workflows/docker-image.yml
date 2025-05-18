@@ -10,32 +10,15 @@ env:
 jobs:
   build-push:
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-          install: true
-
-      - name: Generate timestamp
-        id: timestamp
+      # 新增凭证助手配置
+      - name: Configure Docker credentials helper
         run: |
-          echo "TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.timestamp.outputs.TAG }}
+          mkdir -p ~/.docker
+          echo '{"credsStore":"pass"}' > ~/.docker/config.json
 
       - name: Login to Private Registry
         uses: docker/login-action@v3
@@ -44,26 +27,9 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          # 新增推送重试机制
-          push-retry: 3
-          # 启用详细调试日志
-          provenance: false
-          labels: |
-            org.opencontainers.image.created=${{ steps.timestamp.outputs.DATE }}
-
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - name: SSH Deployment
         uses: appleboy/ssh-action@v1
@@ -73,17 +39,29 @@ jobs:
           password: ${{ secrets.HOST_PASSWORD }}
           port: ${{ secrets.HOST_PORT }}
           script: |
-            # 确保镜像地址包含私有仓库域名
-            IMAGE_FULL="${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image_tag }}"
-            
-            # 私有仓库登录（需在服务器预先配置）
-            echo ${{ secrets.DOCKER_PASSWORD }} | docker login \
-              -u ${{ secrets.DOCKER_USERNAME }} \
-              ${{ secrets.DOCKER_SERVICE }} \
-              --password-stdin
+            # 新增部署前置检查
+            DEPLOY_DIR="/srv/bookjs"
+            COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yaml"
+
+            # 确保目录存在
+            sudo mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
+
+            # 带错误处理的克隆操作
+            if [ ! -d .git ]; then
+              git clone https://github.com/panxuesen/book-js.git . --depth 1
+            else
+              git fetch origin && git reset --hard origin/master
+            fi
+
+            # 验证 compose 文件存在
+            if [ ! -f "$COMPOSE_FILE" ]; then
+              echo "❌ Missing $COMPOSE_FILE"
+              ls -lah $DEPLOY_DIR
+              exit 1
+            fi
 
             # 部署命令
             docker stack deploy \
-              --compose-file docker-compose.yaml \
+              --compose-file $COMPOSE_FILE \
               --with-registry-auth \
               bookjs_stack
