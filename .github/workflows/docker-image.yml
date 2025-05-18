@@ -17,33 +17,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Validate image name
+      # 新增时间戳生成步骤
+      - name: Generate timestamp tag
+        id: timestamp
         run: |
-          if [[ ! "$IMAGE_NAME" =~ ^[a-z0-9.-]+(/[a-z0-9_-]+){2}$ ]]; then
-            echo "##[error] Invalid image name format: $IMAGE_NAME"
-            exit 1
-          fi
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
+          TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "TAG=${TAG}" >> $GITHUB_ENV
 
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
+          # 使用raw类型定义标签
           tags: |
             type=raw,value=latest
-            type=date,pattern=yyMMdd-HHmmss,timezone=Asia/Shanghai
-
-      - name: Login to Private Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.DOCKER_SERVICE }}
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+            type=raw,value=${{ steps.timestamp.outputs.tag }}
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -58,9 +48,8 @@ jobs:
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
-    environment: production
     steps:
-      - name: SSH Deployment
+      - name: Deploy with SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HOST }}
