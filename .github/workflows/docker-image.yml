@@ -84,6 +84,6 @@ jobs:
 
             # 部署命令
             docker stack deploy \
-              --compose-file docker-compose.prod.yaml \
+              --compose-file docker-compose.yaml \
               --with-registry-auth \
               bookjs_stack
