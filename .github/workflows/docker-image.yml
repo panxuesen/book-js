@@ -5,7 +5,7 @@ on:
     branches: [ "master" ]
 
 env:
-  IMAGE_NAME: ${{ secrets.DOCKER_SERVICE }}/xpan/book-js  # 直接拼接secret
+  IMAGE_NAME: ${{ secrets.DOCKER_SERVICE }}/xpan/book-js
 
 jobs:
   build-push:
@@ -16,6 +16,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # 新增 buildx 初始化步骤
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container  # 关键：使用容器化驱动
+          driver-opts: |
+            image=moby/buildkit:master  # 使用最新buildkit镜像
 
       - name: Generate timestamp
         id: timestamp
@@ -34,7 +42,7 @@ jobs:
       - name: Login to Private Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ secrets.DOCKER_SERVICE }}  # 关键：显式指定私有仓库地址
+          registry: ${{ secrets.DOCKER_SERVICE }}
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
@@ -47,12 +55,12 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          builder: ${{ env.BUILDX_NAME }}  # 使用自定义builder
 
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
     environment: production
-
     steps:
       - name: SSH Deployment
         uses: appleboy/ssh-action@v1
