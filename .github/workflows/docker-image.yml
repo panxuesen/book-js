@@ -5,8 +5,7 @@ on:
     branches: [ "master" ]
 
 env:
-  REGISTRY: ${{ secrets.DOCKER_SERVICE }}
-  IMAGE_NAME: ${{ env.REGISTRY }}/xpan/book-js
+  IMAGE_NAME: ${{ secrets.DOCKER_SERVICE }}/xpan/book-js
 
 jobs:
   build-push:
