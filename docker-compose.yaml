@@ -10,6 +10,7 @@ services:
         delay: 10s
         order: start-first
         failure_action: rollback  # 添加失败自动回滚
+        monitor: 60s  # 监控更新状态的时间窗口
       restart_policy:
         condition: any
         delay: 5s
@@ -23,30 +24,45 @@ services:
           cpus: '0.1'
           memory: 256M
     volumes:
+      # 使用持久卷，可以根据环境选择合适的存储方式
       - bookjs_data:/app/data
     environment:
       TZ: Asia/Shanghai
       NODE_ENV: production
-      # 可以添加应用特定的环境变量
       LOG_LEVEL: info
+      # 添加重试配置
+      HTTP_RETRY_COUNT: 3
+      HTTP_RETRY_DELAY: 1000
     ports:
       - "770:3000"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s  # 给应用启动的缓冲时间
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - bookjs_network
 
 volumes:
   bookjs_data:
-    driver: local  # 改为本地存储，更可靠
+    # 可选择本地卷或 NFS，根据实际环境选择
+    driver: local
     driver_opts:
       type: none
       device: /data/bookjs
       o: bind
+    # 如需使用 NFS，使用下面的配置替代上面的 local 配置
+    # driver: local
+    # driver_opts:
+    #   type: nfs
+    #   o: addr=nfs.example.com,rw,soft,timeo=30,retrans=3
+    #   device: ":/path/to/data"
 
 networks:
   bookjs_network:
