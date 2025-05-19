@@ -2,7 +2,8 @@ name: BookJS CI/CD Pipeline
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
+  workflow_dispatch:  # 添加手动触发选项
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKER_SERVICE }}/xpan/book-js
@@ -11,22 +12,22 @@ jobs:
   build-push:
     runs-on: ubuntu-latest
     outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-
+      image_tag: ${{ steps.timestamp.outputs.TAG }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
-          version: v0.11.0
-
+      
       - name: Generate timestamp
         id: timestamp
         run: |
           echo "TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+      
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -35,12 +36,22 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ steps.timestamp.outputs.TAG }}
+      
       - name: Login to Private Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ secrets.DOCKER_SERVICE }}
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
 
   deploy:
     needs: build-push
@@ -54,25 +65,42 @@ jobs:
           password: ${{ secrets.HOST_PASSWORD }}
           port: ${{ secrets.HOST_PORT }}
           script: |
-            # 新增部署前置检查
+            # 部署前置检查
             DEPLOY_DIR="/srv/bookjs"
             COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yaml"
+            
             # 确保目录存在
-            sudo mkdir -p $DEPLOY_DIR && cd $DEPLOY_DIR
+            sudo mkdir -p $DEPLOY_DIR
+            cd $DEPLOY_DIR || exit 1
+            
             # 带错误处理的克隆操作
             if [ ! -d .git ]; then
-              git clone https://github.com/panxuesen/book-js.git . --depth 1
+              echo "初始化代码库..."
+              git clone https://github.com/panxuesen/book-js.git . --depth 1 || { echo "❌ 仓库克隆失败"; exit 1; }
             else
-              git fetch origin && git reset --hard origin/master
+              echo "更新代码库..."
+              git fetch origin && git reset --hard origin/master || { echo "❌ 代码更新失败"; exit 1; }
             fi
+            
             # 验证 compose 文件存在
             if [ ! -f "$COMPOSE_FILE" ]; then
-              echo "❌ Missing $COMPOSE_FILE"
+              echo "❌ 缺少 docker-compose 配置文件: $COMPOSE_FILE"
               ls -lah $DEPLOY_DIR
               exit 1
             fi
+            
+            # 拉取最新镜像
+            echo "拉取最新镜像..."
+            docker pull ${{ env.IMAGE_NAME }}:latest || { echo "❌ 拉取镜像失败"; exit 1; }
+            
             # 部署命令
+            echo "部署服务..."
             docker stack deploy \
               --compose-file $COMPOSE_FILE \
               --with-registry-auth \
               bookjs_stack
+            
+            # 检查部署状态
+            echo "等待服务启动..."
+            sleep 10
+            docker stack services bookjs_stack

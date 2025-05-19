@@ -9,35 +9,50 @@ services:
         parallelism: 1
         delay: 10s
         order: start-first
+        failure_action: rollback  # 添加失败自动回滚
       restart_policy:
         condition: any
         delay: 5s
         max_attempts: 3
+        window: 120s  # 添加判定窗口期
       resources:
         limits:
           cpus: '0.5'
           memory: 768M
+        reservations:  # 添加资源保留
+          cpus: '0.1'
+          memory: 256M
     volumes:
       - bookjs_data:/app/data
     environment:
       TZ: Asia/Shanghai
       NODE_ENV: production
+      # 可以添加应用特定的环境变量
+      LOG_LEVEL: info
     ports:
       - "770:3000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 20s  # 给应用启动的缓冲时间
+    networks:
+      - bookjs_network
 
 volumes:
   bookjs_data:
+    driver: local  # 改为本地存储，更可靠
     driver_opts:
-      type: nfs
-      o: addr=nfs.example.com,rw
-      device: ":/path/to/data"
+      type: none
+      device: /data/bookjs
+      o: bind
 
 networks:
-  default:
+  bookjs_network:
     driver: overlay
     attachable: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.10.0.0/24
