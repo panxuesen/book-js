@@ -14,61 +14,44 @@ services:
       restart_policy:
         condition: any
         delay: 5s
-        max_attempts: 3
-        window: 120s  # 添加判定窗口期
+        max_attempts: 5  # 增加重试次数
+        window: 120s
       resources:
         limits:
           cpus: '0.5'
           memory: 768M
-        reservations:  # 添加资源保留
+        reservations:
           cpus: '0.1'
           memory: 256M
     volumes:
-      # 使用持久卷，可以根据环境选择合适的存储方式
-      - bookjs_data:/app/data
+      # 简化卷配置，首先确保基本功能正常
+      - /data/bookjs:/app/data
     environment:
       TZ: Asia/Shanghai
       NODE_ENV: production
-      LOG_LEVEL: info
-      # 添加重试配置
-      HTTP_RETRY_COUNT: 3
-      HTTP_RETRY_DELAY: 1000
+      LOG_LEVEL: debug  # 改为 debug 级别以获取更多信息
+      # 应用连接信息
+      APP_PORT: 3000
+      DATA_DIR: /app/data
     ports:
       - "770:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s  # 给应用启动的缓冲时间
+      start_period: 30s  # 增加启动宽限期
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    networks:
-      - bookjs_network
+    # 确保有 /tmp 写入权限
+    tmpfs:
+      - /tmp
 
-volumes:
-  bookjs_data:
-    # 可选择本地卷或 NFS，根据实际环境选择
-    driver: local
-    driver_opts:
-      type: none
-      device: /data/bookjs
-      o: bind
-    # 如需使用 NFS，使用下面的配置替代上面的 local 配置
-    # driver: local
-    # driver_opts:
-    #   type: nfs
-    #   o: addr=nfs.example.com,rw,soft,timeo=30,retrans=3
-    #   device: ":/path/to/data"
-
+# 简化网络配置，使用默认网络
 networks:
-  bookjs_network:
+  default:
     driver: overlay
     attachable: true
-    ipam:
-      driver: default
-      config:
-        - subnet: 10.10.0.0/24
