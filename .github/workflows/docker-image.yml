@@ -3,13 +3,10 @@ name: BookJS CI/CD Pipeline
 on:
   push:
     branches: ["master"]
-  workflow_dispatch:
+  workflow_dispatch:  # 添加手动触发选项
 
 env:
   IMAGE_NAME: ${{ secrets.DOCKER_SERVICE }}/xpan/book-js
-  # 设置并行构建参数提高构建速度
-  DOCKER_BUILDKIT: 1
-  BUILDX_NO_DEFAULT_LOAD: 1
 
 jobs:
   build-push:
@@ -20,19 +17,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1  # 浅克隆加速检出
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
-          version: latest
-          driver-opts: |
-            image=moby/buildkit:latest
+          driver: docker-container
       
       - name: Generate timestamp
         id: timestamp
-        run: echo "TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+        run: |
+          echo "TAG=$(TZ=Asia/Shanghai date +'%y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
       
       - name: Docker metadata
         id: meta
@@ -50,71 +44,60 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       
-      - name: Build and push Docker image
+      - name: Build Docker image
         id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true  # 直接构建并推送
+          push: false  # 先构建不推送
+          load: true   # 加载到本地 Docker 引擎
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: |
-            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
-            type=registry,ref=${{ env.IMAGE_NAME }}:latest
-          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
-          platforms: linux/amd64
-          provenance: false  # 减少额外元数据生成
-          outputs: type=registry,push-by-digest=true
-          # 启用并行构建
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            DOCKER_BUILDKIT=1
-          # 添加额外构建加速参数
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ steps.timestamp.outputs.TAG }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+      
+      - name: Push Docker image with retry
+        id: docker_push
+        run: |
+          MAX_RETRIES=5
+          RETRY_DELAY=10
+          TIMESTAMP_TAG="${{ steps.timestamp.outputs.TAG }}"
+          LATEST_TAG="latest"
+          REGISTRY="${{ secrets.DOCKER_SERVICE }}"
+          REPO="xpan/book-js"
+          
+          # 定义推送函数
+          push_image() {
+            local tag=$1
+            echo "推送镜像标签: $tag"
+            
+            for i in $(seq 1 $MAX_RETRIES); do
+              echo "尝试 #$i: 推送 $REGISTRY/$REPO:$tag"
+              if docker push "$REGISTRY/$REPO:$tag"; then
+                echo "✅ 成功推送 $REGISTRY/$REPO:$tag"
+                return 0
+              else
+                echo "❌ 推送失败，等待 $RETRY_DELAY 秒后重试..."
+                sleep $RETRY_DELAY
+                # 指数退避策略
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+              fi
+            done
+            
+            echo "❌ 推送失败: 已达到最大重试次数 ($MAX_RETRIES)"
+            return 1
+          }
+          
+          # 先推送指定版本标签，再推送 latest 标签
+          push_image "$TIMESTAMP_TAG" || exit 1
+          push_image "$LATEST_TAG" || exit 1
+          
+          echo "✅ 所有镜像标签推送成功"
 
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare deployment files
-        run: |
-          # 创建最小化的部署配置
-          mkdir -p deploy
-          cat > deploy/docker-compose.yaml <<EOF
-          version: '3.8'
-          services:
-            bookjs:
-              image: ${{ env.IMAGE_NAME }}:${{ needs.build-push.outputs.image_tag }}
-              deploy:
-                replicas: 1
-                update_config:
-                  parallelism: 1
-                  order: start-first
-                  failure_action: rollback
-              ports:
-                - "770:770"
-              healthcheck:
-                test: ["CMD", "curl", "-f", "http://localhost:770/health"]
-                interval: 10s
-                timeout: 5s
-                retries: 3
-                start_period: 10s
-          EOF
-      
-      - name: Upload deployment configuration
-        uses: appleboy/scp-action@v0.1.4
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.HOST_USERNAME }}
-          password: ${{ secrets.HOST_PASSWORD }}
-          port: ${{ secrets.HOST_PORT }}
-          source: "deploy/docker-compose.yaml"
-          target: "/srv/bookjs"
-          strip_components: 1
-          overwrite: true
-      
-      - name: Deploy with optimized settings
+      - name: SSH Deployment
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HOST }}
@@ -122,7 +105,7 @@ jobs:
           password: ${{ secrets.HOST_PASSWORD }}
           port: ${{ secrets.HOST_PORT }}
           script: |
-            # 简化的部署脚本
+            # 部署前置检查
             DEPLOY_DIR="/srv/bookjs"
             COMPOSE_FILE="$DEPLOY_DIR/docker-compose.yaml"
             IMAGE_NAME="${{ env.IMAGE_NAME }}"
@@ -130,27 +113,86 @@ jobs:
             
             echo "=== 开始部署 BookJS (${IMAGE_TAG}) ==="
             
-            # 预拉取镜像提高部署速度
+            # 确保目录存在
+            sudo mkdir -p $DEPLOY_DIR
+            cd $DEPLOY_DIR || { echo "❌ 无法切换到部署目录"; exit 1; }
+            
+            # 带错误处理的克隆操作
+            if [ ! -d .git ]; then
+              echo "初始化代码库..."
+              git clone https://github.com/panxuesen/book-js.git . --depth 1 || { echo "❌ 仓库克隆失败"; exit 1; }
+            else
+              echo "更新代码库..."
+              git fetch origin && git reset --hard origin/master || { echo "❌ 代码更新失败"; exit 1; }
+            fi
+            
+            # 验证 compose 文件存在
+            if [ ! -f "$COMPOSE_FILE" ]; then
+              echo "❌ 缺少 docker-compose 配置文件: $COMPOSE_FILE"
+              ls -lah $DEPLOY_DIR
+              exit 1
+            fi
+            
+            # 拉取最新镜像，带重试机制
             echo "拉取镜像: ${IMAGE_NAME}:${IMAGE_TAG}..."
-            docker pull "${IMAGE_NAME}:${IMAGE_TAG}" || {
-              echo "⚠️ 拉取失败，使用现有镜像继续部署"
-            }
+            MAX_RETRIES=5
+            RETRY_DELAY=5
+            
+            for i in $(seq 1 $MAX_RETRIES); do
+              echo "尝试 #$i: 拉取镜像"
+              if docker pull "${IMAGE_NAME}:${IMAGE_TAG}"; then
+                echo "✅ 镜像拉取成功"
+                # 标记为 latest 以备不时之需
+                docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${IMAGE_NAME}:latest"
+                break
+              else
+                echo "❌ 拉取失败，等待 ${RETRY_DELAY} 秒后重试..."
+                if [ $i -eq $MAX_RETRIES ]; then
+                  echo "❌ 镜像拉取失败: 已达到最大重试次数"
+                  echo "尝试使用本地缓存..."
+                  if ! docker image inspect "${IMAGE_NAME}:latest" &>/dev/null; then
+                    echo "❌ 没有本地镜像可用，部署失败"
+                    exit 1
+                  fi
+                  echo "⚠️ 使用本地缓存的镜像继续部署"
+                fi
+                sleep $RETRY_DELAY
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+              fi
+            done
+            
+            # 备份当前配置文件
+            cp $COMPOSE_FILE ${COMPOSE_FILE}.bak || echo "⚠️ 无法创建配置备份"
+            
+            # 修改 compose 文件中的镜像标签
+            sed -i "s|image: ${IMAGE_NAME}:latest|image: ${IMAGE_NAME}:${IMAGE_TAG}|g" $COMPOSE_FILE
             
             # 部署命令
             echo "部署服务..."
-            # 使用--prune自动清理不再使用的服务和容器
-            docker stack deploy --compose-file $COMPOSE_FILE --with-registry-auth --prune bookjs_stack
-            
-            # 高效检查部署状态
-            echo "检查服务状态..."
-            for i in {1..6}; do
-              STATUS=$(docker stack services bookjs_stack --format "{{.Name}} {{.Replicas}}" | grep "bookjs" || echo "")
-              if [[ "$STATUS" == *"1/1"* ]]; then
-                echo "✅ 服务已成功部署: $STATUS"
-                exit 0
+            if docker stack deploy --compose-file $COMPOSE_FILE --with-registry-auth bookjs_stack; then
+              echo "✅ 部署命令执行成功"
+            else
+              echo "❌ 部署失败，尝试回滚配置..."
+              if [ -f "${COMPOSE_FILE}.bak" ]; then
+                mv ${COMPOSE_FILE}.bak $COMPOSE_FILE
+                docker stack deploy --compose-file $COMPOSE_FILE --with-registry-auth bookjs_stack
               fi
-              echo "服务部署中: $STATUS (等待5秒...)"
-              sleep 5
-            done
+              exit 1
+            fi
             
-            echo "⚠️ 部署可能需要更长时间，请检查: docker stack ps bookjs_stack"
+            # 检查部署状态
+            echo "等待服务启动..."
+            sleep 10
+            echo "服务状态:"
+            docker stack services bookjs_stack
+            
+            # 简单验证服务是否可访问
+            echo "验证服务..."
+            sleep 10
+            if curl -4 -s --max-time 5 http://localhost:770/health &>/dev/null; then
+              echo "✅ 服务验证成功"
+            else
+              echo "⚠️ 服务可能尚未就绪，请稍后手动检查"
+            fi
+            
+            echo "=== 部署完成 ==="
